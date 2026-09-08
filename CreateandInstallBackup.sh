@@ -38,23 +38,74 @@ header() {
 }
 
 check_dependencies() {
-    local missing=0
+    local missing_packages=()
 
+    # เช็ก zip
+    if ! command -v zip >/dev/null 2>&1; then
+        missing_packages+=("zip")
+    fi
+
+    # เช็ก unzip
+    if ! command -v unzip >/dev/null 2>&1; then
+        missing_packages+=("unzip")
+    fi
+
+    # ถ้ามีครบแล้ว
+    if [ "${#missing_packages[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    echo
+    echo -e "${YELLOW}⚠ พบว่าโปรแกรมที่จำเป็นยังติดตั้งไม่ครบ${RESET}"
+    echo
+
+    for pkg in "${missing_packages[@]}"; do
+        echo -e "  ${RED}✗${RESET} $pkg"
+    done
+
+    echo
+    read -rp "ต้องการติดตั้งให้อัตโนมัติไหม? [Y/n]: " confirm
+
+    case "$confirm" in
+        n|N)
+            echo
+            echo -e "${RED}✗ ยกเลิกการติดตั้ง${RESET}"
+            echo
+            echo "สามารถติดตั้งเองภายหลังด้วย:"
+            echo
+            echo "pkg install ${missing_packages[*]}"
+            echo
+            exit 1
+            ;;
+
+        *)
+            echo
+            echo -e "${CYAN}→ กำลังติดตั้ง ${missing_packages[*]}...${RESET}"
+            echo
+
+            if pkg install "${missing_packages[@]}" -y; then
+                echo
+                echo -e "${GREEN}✓ ติดตั้งสำเร็จ${RESET}"
+            else
+                echo
+                echo -e "${RED}✗ ติดตั้งไม่สำเร็จ${RESET}"
+                exit 1
+            fi
+            ;;
+    esac
+
+    # เช็กซ้ำหลังติดตั้ง
     for cmd in zip unzip; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
-            echo -e "${RED}✗ ไม่พบคำสั่ง $cmd${RESET}"
-            missing=1
+            echo
+            echo -e "${RED}✗ ยังไม่พบคำสั่ง $cmd หลังการติดตั้ง${RESET}"
+            exit 1
         fi
     done
 
-    if [ "$missing" -eq 1 ]; then
-        echo
-        echo -e "${YELLOW}ติดตั้งก่อนด้วย:${RESET}"
-        echo
-        echo "pkg install zip unzip"
-        echo
-        exit 1
-    fi
+    echo
+    echo -e "${GREEN}✓ Dependency พร้อมใช้งานแล้ว${RESET}"
+    sleep 1
 }
 
 check_data_dir() {
