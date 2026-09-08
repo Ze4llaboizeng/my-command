@@ -10,6 +10,7 @@ ST_DIR="$HOME/SillyTavern"
 DATA_DIR="$ST_DIR/data"
 
 BACKUP_DIR="$HOME/ST-Backups"
+DOWNLOAD_DIR=""
 
 TTY="/dev/tty"
 TEMP_RESTORE_DIR=""
@@ -381,6 +382,315 @@ show_backups() {
 }
 
 # =========================================================
+# Directory Preparation
+# =========================================================
+
+prepare_directories() {
+    if ! mkdir -p "$BACKUP_DIR"; then
+        echo
+        echo -e "${RED}✗ ไม่สามารถสร้างโฟลเดอร์ Backup ได้${RESET}"
+        echo
+        echo "ตำแหน่ง:"
+        echo "  $BACKUP_DIR"
+        echo
+        exit 1
+    fi
+}
+
+# =========================================================
+# Android Downloads
+# =========================================================
+
+detect_download_dir() {
+    DOWNLOAD_DIR=""
+
+    # Termux storage symlink หลังใช้ termux-setup-storage
+    if [ -d "$HOME/storage/downloads" ] && [ -r "$HOME/storage/downloads" ]; then
+        DOWNLOAD_DIR="$HOME/storage/downloads"
+        return 0
+    fi
+
+    # Android shared storage path
+    if [ -d "/storage/emulated/0/Download" ] && [ -r "/storage/emulated/0/Download" ]; then
+        DOWNLOAD_DIR="/storage/emulated/0/Download"
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_download_access() {
+    local confirm=""
+    local dummy=""
+
+    if detect_download_dir; then
+        return 0
+    fi
+
+    echo
+    echo -e "${YELLOW}⚠ Termux ยังเข้าโฟลเดอร์ Download ของเครื่องไม่ได้${RESET}"
+    echo
+    echo "ต้องอนุญาตสิทธิ์ Storage ให้ Termux ก่อน"
+    echo
+
+    if ! command -v termux-setup-storage >/dev/null 2>&1; then
+        echo -e "${RED}✗ ไม่พบคำสั่ง termux-setup-storage${RESET}"
+        echo
+        echo "กรุณาตรวจสอบว่าใช้ Termux เวอร์ชันที่รองรับการเข้าถึง Storage"
+        return 1
+    fi
+
+    ask "ให้ตั้งค่าสิทธิ์ Storage ตอนนี้ไหม? [Y/n]: " confirm
+
+    if no_answer "$confirm"; then
+        echo
+        echo -e "${YELLOW}ยกเลิกการเข้าถึง Downloads${RESET}"
+        return 1
+    fi
+
+    echo
+    echo -e "${CYAN}→ กำลังเรียก termux-setup-storage...${RESET}"
+    echo
+    echo -e "${GRAY}Android อาจแสดงหน้าต่างให้อนุญาตสิทธิ์ไฟล์${RESET}"
+    echo
+
+    termux-setup-storage
+
+    echo
+    ask "หลังจากกดอนุญาตสิทธิ์แล้ว กด Enter เพื่อดำเนินการต่อ..." dummy
+
+    if detect_download_dir; then
+        echo
+        echo -e "${GREEN}✓ เข้าถึง Downloads ได้แล้ว${RESET}"
+        return 0
+    fi
+
+    echo
+    echo -e "${RED}✗ ยังไม่สามารถเข้าถึง Downloads ได้${RESET}"
+    echo
+    echo "ลองตรวจสอบสิทธิ์ Files/Storage ของ Termux ใน Android Settings"
+    return 1
+}
+
+get_download_zips() {
+    DOWNLOAD_ZIPS=()
+
+    shopt -s nullglob nocaseglob
+    DOWNLOAD_ZIPS=("$DOWNLOAD_DIR"/data*.zip)
+    shopt -u nocaseglob nullglob
+}
+
+file_modified_date() {
+    local file="$1"
+    local result=""
+
+    result=$(date -r "$file" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+
+    if [ -n "$result" ]; then
+        printf '%s' "$result"
+        return
+    fi
+
+    result=$(stat -c '%y' "$file" 2>/dev/null | cut -d'.' -f1)
+
+    if [ -n "$result" ]; then
+        printf '%s' "$result"
+    else
+        printf '%s' "ไม่ทราบวันที่"
+    fi
+}
+
+list_download_zips() {
+    local i=1
+    local file=""
+    local filename=""
+    local size=""
+    local modified=""
+
+    get_download_zips
+
+    if [ "${#DOWNLOAD_ZIPS[@]}" -eq 0 ]; then
+        echo -e "${YELLOW}ไม่พบไฟล์ data*.zip ใน Downloads${RESET}"
+        return 1
+    fi
+
+    for file in "${DOWNLOAD_ZIPS[@]}"; do
+        filename=$(basename "$file")
+        size=$(format_size "$file")
+        modified=$(file_modified_date "$file")
+
+        echo -e "  ${CYAN}${i})${RESET} ${BOLD}${filename}${RESET}"
+        echo -e "     วันที่ : ${modified}"
+        echo -e "     ขนาด  : ${size}"
+        echo
+
+        ((i++))
+    done
+
+    return 0
+}
+
+import_download_backup() {
+    local choice=""
+    local source_file=""
+    local source_name=""
+    local source_base=""
+    local backup_name=""
+    local destination=""
+    local confirm=""
+
+    header
+
+    echo -e "${BOLD}นำเข้า Backup จาก Downloads${RESET}"
+    echo "──────────────────────────────────────"
+    echo
+
+    prepare_directories
+
+    if ! ensure_download_access; then
+        pause
+        return
+    fi
+
+    echo -e "Downloads : ${CYAN}$DOWNLOAD_DIR${RESET}"
+    echo -e "ปลายทาง   : ${CYAN}$BACKUP_DIR${RESET}"
+    echo
+
+    if ! list_download_zips; then
+        echo
+        echo "รองรับชื่ออย่างเช่น:"
+        echo "  data.zip"
+        echo "  data (1).zip"
+        echo "  data-backup.zip"
+        echo "  Data.zip"
+        pause
+        return
+    fi
+
+    ask "เลือกหมายเลขไฟล์ที่จะย้ายเข้า ST-Backups: " choice
+
+    if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+        echo
+        echo -e "${RED}✗ กรุณาใส่เป็นตัวเลข${RESET}"
+        pause
+        return
+    fi
+
+    if (( choice < 1 || choice > ${#DOWNLOAD_ZIPS[@]} )); then
+        echo
+        echo -e "${RED}✗ ไม่มีไฟล์หมายเลขนี้${RESET}"
+        pause
+        return
+    fi
+
+    source_file="${DOWNLOAD_ZIPS[$((choice - 1))]}"
+    source_name=$(basename "$source_file")
+    source_base="${source_name%.zip}"
+
+    echo
+    echo -e "ไฟล์ที่เลือก : ${CYAN}$source_name${RESET}"
+    echo -e "วันที่       : $(file_modified_date "$source_file")"
+    echo -e "ขนาด        : $(format_size "$source_file")"
+    echo
+
+    echo -e "${CYAN}→ กำลังตรวจสอบ ZIP ก่อนนำเข้า...${RESET}"
+    echo
+
+    if ! validate_backup_zip "$source_file"; then
+        echo
+        echo -e "${RED}✗ ไฟล์นี้ไม่ใช่ Backup ที่พร้อม Restore${RESET}"
+        echo "ไฟล์จะยังอยู่ใน Downloads และจะไม่ถูกย้าย"
+        pause
+        return
+    fi
+
+    echo
+    echo "ตั้งชื่อ Backup ที่จะเก็บใน ST-Backups"
+    echo -e "${GRAY}กด Enter เพื่อใช้ชื่อเดิม: $source_base${RESET}"
+    echo
+
+    ask "ชื่อ Backup: " backup_name
+
+    if [ -z "$backup_name" ]; then
+        backup_name="$source_base"
+    fi
+
+    backup_name="${backup_name%.zip}"
+
+    if [ -z "$backup_name" ]; then
+        echo
+        echo -e "${RED}✗ ชื่อ Backup ห้ามว่าง${RESET}"
+        pause
+        return
+    fi
+
+    if [[ "$backup_name" == *"/"* ]]; then
+        echo
+        echo -e "${RED}✗ ชื่อ Backup ห้ามมีเครื่องหมาย /${RESET}"
+        pause
+        return
+    fi
+
+    if [ "$backup_name" = "." ] || [ "$backup_name" = ".." ]; then
+        echo
+        echo -e "${RED}✗ ชื่อ Backup นี้ใช้ไม่ได้${RESET}"
+        pause
+        return
+    fi
+
+    destination="$BACKUP_DIR/$backup_name.zip"
+
+    if [ -e "$destination" ]; then
+        echo
+        echo -e "${YELLOW}⚠ มี Backup ชื่อนี้อยู่ใน ST-Backups แล้ว${RESET}"
+        echo
+        echo "  $destination"
+        echo
+        echo "เพื่อป้องกัน Backup เดิมหาย จะไม่เขียนทับอัตโนมัติ"
+        echo
+        pause
+        return
+    fi
+
+    echo
+    echo -e "${YELLOW}ไฟล์นี้จะถูกย้ายออกจาก Downloads${RESET}"
+    echo
+    echo -e "จาก : ${CYAN}$source_file${RESET}"
+    echo -e "ไป  : ${CYAN}$destination${RESET}"
+    echo
+
+    ask "ยืนยันการย้ายไฟล์ไหม? [y/N]: " confirm
+
+    if ! yes_answer "$confirm"; then
+        echo
+        echo -e "${YELLOW}ยกเลิกการนำเข้า Backup${RESET}"
+        pause
+        return
+    fi
+
+    echo
+    echo -e "${CYAN}→ กำลังย้าย Backup เข้า ST-Backups...${RESET}"
+    echo
+
+    if mv -- "$source_file" "$destination"; then
+        echo -e "${GREEN}${BOLD}✓ นำเข้า Backup สำเร็จ${RESET}"
+        echo
+        echo -e "ชื่อ      : ${BOLD}$backup_name.zip${RESET}"
+        echo -e "ขนาด     : $(format_size "$destination")"
+        echo -e "ตำแหน่ง  : ${CYAN}$destination${RESET}"
+        echo
+        echo -e "${GREEN}พร้อมใช้เมนู Restore Backup ต่อได้แล้ว${RESET}"
+    else
+        echo -e "${RED}✗ ย้ายไฟล์ไม่สำเร็จ${RESET}"
+        echo
+        echo "ไฟล์ต้นฉบับควรยังอยู่ที่:"
+        echo "  $source_file"
+    fi
+
+    pause
+}
+
+# =========================================================
 # ZIP Validation
 # =========================================================
 
@@ -643,7 +953,8 @@ main_menu() {
         echo
         echo -e "  ${GREEN}1)${RESET} 📦 Backup SillyTavern data"
         echo -e "  ${CYAN}2)${RESET} ♻️  Restore Backup"
-        echo -e "  ${YELLOW}3)${RESET} 📋 ดูรายการ Backup"
+        echo -e "  ${YELLOW}3)${RESET} 📥 นำเข้า data.zip จาก Downloads"
+        echo -e "  ${CYAN}4)${RESET} 📋 ดูรายการ Backup"
         echo -e "  ${RED}0)${RESET} 🚪 ออก"
         echo
         echo "──────────────────────────────────────"
@@ -664,6 +975,10 @@ main_menu() {
                 ;;
 
             3)
+                import_download_backup
+                ;;
+
+            4)
                 show_backups
                 ;;
 
@@ -677,7 +992,7 @@ main_menu() {
 
             *)
                 echo
-                echo -e "${RED}✗ กรุณาเลือก 0 - 3${RESET}"
+                echo -e "${RED}✗ กรุณาเลือก 0 - 4${RESET}"
                 sleep 1
                 ;;
         esac
@@ -689,5 +1004,6 @@ main_menu() {
 # =========================================================
 
 check_tty
+prepare_directories
 check_dependencies
 main_menu
