@@ -207,6 +207,21 @@ chmod +x st-tailscale-wizard.sh
 | [`SupabigChad.sh`](./SupabigChad.sh)                 | เลือกและย้าย Chat `.jsonl` ล่าสุดไป Downloads | Termux                                 |
 | [`st-tailscale-wizard.sh`](./st-tailscale-wizard.sh) | ตั้งค่า SillyTavern ให้ใช้งานผ่าน Tailscale   | Termux / Windows / WSL / Linux / macOS |
 | [`StartWithTailscale.bat`](./StartWithTailscale.bat) | เมนู Tailscale สำหรับ Windows CMD             | Windows                                |
+| [`CreateandInstallBackup.sh`](./CreateandInstallBackup.sh) | สำรองและ Restore data จาก ZIP หรือ backup ของ installer | Termux |
+
+---
+
+## 📦 กู้ data หลังติดตั้งใหม่ด้วย `install.sh` ข้อ b
+
+ข้อ b เก็บโฟลเดอร์เดิมไว้ที่ `~/SillyTavern_backup_วันเวลา` เมื่อติดตั้งใหม่แล้ว ให้ปิด SillyTavern และรัน:
+
+```bash
+bash CreateandInstallBackup.sh
+```
+
+เลือก **2) Restore Backup** แล้วเลือก `SillyTavern_backup_... [install.sh b / data]` และยืนยัน สคริปต์จะคัดลอกเฉพาะ `data/` มาทดแทน `~/SillyTavern/data` ทั้งโฟลเดอร์ ไฟล์โปรแกรมและ `config.yaml` ของชุดใหม่ยังคงเดิม และ backup ต้นฉบับยังอยู่ครบ
+
+ระบบเตรียมสำเนาให้เสร็จก่อนเปลี่ยน data ปัจจุบัน หากวางข้อมูลไม่สำเร็จจะพยายามคืน data เดิมให้อัตโนมัติ เมื่อ Restore สำเร็จ data ชุดก่อน Restore จะถูกลบ เมนูเดิมยังรองรับ ZIP ใน `~/ST-Backups` ด้วย
 
 ---
 
