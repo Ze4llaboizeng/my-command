@@ -10,6 +10,7 @@ ST_DIR="$HOME/SillyTavern"
 DATA_DIR="$ST_DIR/data"
 
 BACKUP_DIR="$HOME/ST-Backups"
+INSTALLER_BACKUP_ROOT="$HOME"
 DOWNLOAD_DIR=""
 
 TTY="/dev/tty"
@@ -81,7 +82,7 @@ header() {
 }
 
 format_size() {
-    du -h "$1" 2>/dev/null | cut -f1
+    du -sh "$1" 2>/dev/null | cut -f1
 }
 
 yes_answer() {
@@ -330,8 +331,15 @@ backup_data() {
 # =========================================================
 
 get_backups() {
+    local folder=""
+
     shopt -s nullglob
     BACKUPS=("$BACKUP_DIR"/*.zip)
+    for folder in "$INSTALLER_BACKUP_ROOT"/SillyTavern_backup_*; do
+        if [ -d "$folder/data" ]; then
+            BACKUPS+=("$folder")
+        fi
+    done
     shopt -u nullglob
 }
 
@@ -350,7 +358,12 @@ list_backups() {
 
     for file in "${BACKUPS[@]}"; do
         basename_file=$(basename "$file")
-        size=$(format_size "$file")
+        if [ -d "$file" ]; then
+            basename_file="$basename_file [install.sh b / data]"
+            size=$(format_size "$file/data")
+        else
+            size=$(format_size "$file")
+        fi
 
         printf \
             "  ${CYAN}%2d)${RESET} %-35s ${GRAY}%s${RESET}\n" \
@@ -377,6 +390,7 @@ show_backups() {
 
     echo
     echo -e "${GRAY}Folder: $BACKUP_DIR${RESET}"
+    echo -e "${GRAY}Installer: $INSTALLER_BACKUP_ROOT/SillyTavern_backup_*/data${RESET}"
 
     pause
 }
@@ -747,12 +761,13 @@ validate_backup_zip() {
 
 restore_backup() {
     local choice=""
-    local zipfile=""
+    local backup=""
     local filename=""
     local confirm=""
     local current_size=""
     local backup_size=""
     local old_data=""
+    local restore_ready=0
 
     header
 
@@ -789,9 +804,13 @@ restore_backup() {
         return
     fi
 
-    zipfile="${BACKUPS[$((choice - 1))]}"
-    filename=$(basename "$zipfile")
-    backup_size=$(format_size "$zipfile")
+    backup="${BACKUPS[$((choice - 1))]}"
+    filename=$(basename "$backup")
+    if [ -d "$backup" ]; then
+        backup_size=$(format_size "$backup/data")
+    else
+        backup_size=$(format_size "$backup")
+    fi
 
     echo
     echo -e "Backup ที่เลือก : ${CYAN}$filename${RESET}"
@@ -799,23 +818,39 @@ restore_backup() {
     echo -e "Restore ไปที่  : ${CYAN}$DATA_DIR${RESET}"
     echo
 
-    if ! validate_backup_zip "$zipfile"; then
+    if [ -d "$backup" ]; then
+        if [ ! -d "$backup/data" ]; then
+            echo -e "${RED}✗ ไม่พบ data/ ใน Backup ที่เลือก${RESET}"
+            pause
+            return
+        fi
+        echo "จะคัดลอกเฉพาะ data/ โดยเก็บโฟลเดอร์ Backup ต้นฉบับไว้"
+    elif ! validate_backup_zip "$backup"; then
         pause
         return
     fi
 
-    TEMP_RESTORE_DIR="$ST_DIR/.stbackup-restore-$$"
-
-    rm -rf -- "$TEMP_RESTORE_DIR" 2>/dev/null
-    mkdir -p "$TEMP_RESTORE_DIR"
+    if ! TEMP_RESTORE_DIR=$(mktemp -d "$ST_DIR/.stbackup-restore.XXXXXX"); then
+        echo -e "${RED}✗ สร้างพื้นที่ชั่วคราวสำหรับ Restore ไม่สำเร็จ${RESET}"
+        pause
+        return
+    fi
 
     echo
     echo -e "${CYAN}→ กำลังเตรียม Backup สำหรับ Restore...${RESET}"
     echo -e "${GRAY}  ตอนนี้ยังไม่ได้แตะ data ปัจจุบัน${RESET}"
     echo
 
-    if ! unzip -q "$zipfile" -d "$TEMP_RESTORE_DIR"; then
-        echo -e "${RED}✗ แตก Backup ไปยังพื้นที่ชั่วคราวไม่สำเร็จ${RESET}"
+    if [ -d "$backup" ]; then
+        if cp -a -- "$backup/data/." "$TEMP_RESTORE_DIR/data"; then
+            restore_ready=1
+        fi
+    elif unzip -q "$backup" -d "$TEMP_RESTORE_DIR"; then
+        restore_ready=1
+    fi
+
+    if [ "$restore_ready" -ne 1 ]; then
+        echo -e "${RED}✗ เตรียม Backup ไปยังพื้นที่ชั่วคราวไม่สำเร็จ${RESET}"
         rm -rf -- "$TEMP_RESTORE_DIR"
         TEMP_RESTORE_DIR=""
         pause
@@ -823,7 +858,7 @@ restore_backup() {
     fi
 
     if [ ! -d "$TEMP_RESTORE_DIR/data" ]; then
-        echo -e "${RED}✗ หลังแตก ZIP ไม่พบโฟลเดอร์ data/${RESET}"
+        echo -e "${RED}✗ ไม่พบโฟลเดอร์ data/ ที่พร้อม Restore${RESET}"
         rm -rf -- "$TEMP_RESTORE_DIR"
         TEMP_RESTORE_DIR=""
         pause
