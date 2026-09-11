@@ -335,8 +335,13 @@ get_backups() {
 
     shopt -s nullglob
     BACKUPS=("$BACKUP_DIR"/*.zip)
+
+    if [[ "$(basename "$PWD")" == SillyTavern_backup_* ]] && [ -d "$PWD/data" ]; then
+        BACKUPS+=("$PWD")
+    fi
+
     for folder in "$INSTALLER_BACKUP_ROOT"/SillyTavern_backup_*; do
-        if [ -d "$folder/data" ]; then
+        if [ -d "$folder/data" ] && [ "$folder" != "$PWD" ]; then
             BACKUPS+=("$folder")
         fi
     done
@@ -353,6 +358,9 @@ list_backups() {
 
     if [ "${#BACKUPS[@]}" -eq 0 ]; then
         echo -e "${YELLOW}ยังไม่มี Backup${RESET}"
+        echo -e "${GRAY}ค้นหา ZIP ที่: $BACKUP_DIR/*.zip${RESET}"
+        echo -e "${GRAY}ค้นหาโฟลเดอร์ที่: $INSTALLER_BACKUP_ROOT/SillyTavern_backup_*/data${RESET}"
+        echo -e "${GRAY}โฟลเดอร์ปัจจุบัน: $PWD${RESET}"
         return 1
     fi
 
