@@ -15,6 +15,7 @@ DOWNLOAD_DIR=""
 
 TTY="/dev/tty"
 TEMP_RESTORE_DIR=""
+TEMP_BACKUP_DIR=""
 
 # =========================================================
 # Colors
@@ -33,6 +34,9 @@ GRAY="\033[0;90m"
 # =========================================================
 
 cleanup() {
+    if [ -n "$TEMP_BACKUP_DIR" ] && [ -d "$TEMP_BACKUP_DIR" ]; then
+        rm -rf -- "$TEMP_BACKUP_DIR" 2>/dev/null
+    fi
     if [ -n "$TEMP_RESTORE_DIR" ] && [ -d "$TEMP_RESTORE_DIR" ]; then
         rm -rf -- "$TEMP_RESTORE_DIR" 2>/dev/null
     fi
@@ -222,6 +226,7 @@ check_data_dir() {
 # =========================================================
 
 backup_data() {
+    local destination_dir="$BACKUP_DIR"
     local name=""
     local zipfile=""
     local confirm=""
@@ -239,13 +244,28 @@ backup_data() {
         return
     fi
 
-    mkdir -p "$BACKUP_DIR"
+    if [ "${1:-}" = downloads ]; then
+        if ! ensure_download_access; then
+            pause
+            return
+        fi
+        destination_dir="$DOWNLOAD_DIR"
+    fi
+
+    if ! mkdir -p "$destination_dir" || [ ! -w "$destination_dir" ]; then
+        echo -e "${RED}✗ เขียนไฟล์ใน $destination_dir ไม่ได้ กรุณาตรวจสอบสิทธิ์ Storage${RESET}"
+        pause
+        return
+    fi
 
     echo -e "Source : ${CYAN}$DATA_DIR${RESET}"
-    echo -e "Backup : ${CYAN}$BACKUP_DIR${RESET}"
+    echo -e "Backup : ${CYAN}$destination_dir${RESET}"
+    echo -e "${YELLOW}กรุณาปิด SillyTavern ก่อนสำรอง เพื่อให้ข้อมูลครบถ้วน${RESET}"
     echo
 
-    ask "ตั้งชื่อ Backup: " name
+    ask "ตั้งชื่อ Backup (Enter = วันที่และเวลาปัจจุบัน): " name
+
+    name="${name:-data-$(date +%Y%m%d-%H%M%S)}"
 
     name="${name%.zip}"
 
@@ -270,7 +290,17 @@ backup_data() {
         return
     fi
 
-    zipfile="$BACKUP_DIR/$name.zip"
+    # Keep exports discoverable by the existing data*.zip import menu.
+    if [ "${1:-}" = downloads ] && [[ "$name" != data* ]]; then
+        name="data-$name"
+    fi
+    zipfile="$destination_dir/$name.zip"
+
+    if [ -d "$zipfile" ]; then
+        echo -e "${RED}✗ มีโฟลเดอร์ชื่อ $name.zip อยู่แล้ว กรุณาใช้ชื่ออื่น${RESET}"
+        pause
+        return
+    fi
 
     if [ -f "$zipfile" ]; then
         echo
@@ -288,9 +318,13 @@ backup_data() {
             return
         fi
 
-        echo
-        echo -e "${CYAN}→ กำลังลบ Backup เดิม...${RESET}"
-        rm -f -- "$zipfile"
+    fi
+
+    # Stage on the destination filesystem; preserve any old backup until verified.
+    if ! TEMP_BACKUP_DIR=$(mktemp -d "$destination_dir/.stbackup-export.XXXXXX"); then
+        echo -e "${RED}✗ สร้างไฟล์ชั่วคราวไม่ได้ ตรวจสอบสิทธิ์และพื้นที่ว่าง${RESET}"
+        pause
+        return
     fi
 
     echo
@@ -310,8 +344,9 @@ backup_data() {
 
     if (
         cd "$ST_DIR" &&
-        zip -rq "$zipfile" data
-    ); then
+        zip -rq "$TEMP_BACKUP_DIR/backup.zip" data
+    ) && unzip -tq "$TEMP_BACKUP_DIR/backup.zip" >/dev/null 2>&1 &&
+        mv -fT -- "$TEMP_BACKUP_DIR/backup.zip" "$zipfile"; then
         echo -e "${GREEN}✓ Backup สำเร็จ${RESET}"
         echo
         echo -e "ชื่อ      : ${BOLD}$name.zip${RESET}"
@@ -320,8 +355,11 @@ backup_data() {
     else
         echo
         echo -e "${RED}✗ Backup ไม่สำเร็จ${RESET}"
-        rm -f -- "$zipfile"
+        echo "ตรวจสอบพื้นที่ว่างและสิทธิ์เขียนไฟล์ แล้วลองอีกครั้ง"
     fi
+
+    rm -rf -- "$TEMP_BACKUP_DIR"
+    TEMP_BACKUP_DIR=""
 
     pause
 }
@@ -998,6 +1036,7 @@ main_menu() {
         echo -e "  ${CYAN}2)${RESET} ♻️  Restore Backup"
         echo -e "  ${YELLOW}3)${RESET} 📥 นำเข้า data.zip จาก Downloads"
         echo -e "  ${CYAN}4)${RESET} 📋 ดูรายการ Backup"
+        echo -e "  ${GREEN}5)${RESET} 📤 Backup data ลง Download ของมือถือ"
         echo -e "  ${RED}0)${RESET} 🚪 ออก"
         echo
         echo "──────────────────────────────────────"
@@ -1025,6 +1064,10 @@ main_menu() {
                 show_backups
                 ;;
 
+            5)
+                backup_data downloads
+                ;;
+
             0)
                 clear 2>/dev/null || true
                 echo
@@ -1035,7 +1078,7 @@ main_menu() {
 
             *)
                 echo
-                echo -e "${RED}✗ กรุณาเลือก 0 - 4${RESET}"
+                echo -e "${RED}✗ กรุณาเลือก 0 - 5${RESET}"
                 sleep 1
                 ;;
         esac

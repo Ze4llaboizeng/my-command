@@ -211,6 +211,20 @@ chmod +x st-tailscale-wizard.sh
 
 ---
 
+## 📤 สำรอง data ลง Download ของมือถือ
+
+ปิด SillyTavern แล้วรันใน Termux:
+
+```bash
+bash CreateandInstallBackup.sh
+```
+
+เลือก **5) Backup data ลง Download ของมือถือ** แล้วตั้งชื่อ หรือกด Enter เพื่อใช้วันที่และเวลา สคริปต์จะสร้าง `data-*.zip` ใน `~/storage/downloads` (โฟลเดอร์ Download ของมือถือ) โดยคัดลอก `~/SillyTavern/data` ทั้งโฟลเดอร์ ไม่ต้องใช้ Material Files และไม่ย้ายข้อมูลต้นฉบับ
+
+หากยังเข้า Download ไม่ได้ สคริปต์จะเสนอเรียก `termux-setup-storage` ให้กดอนุญาตสิทธิ์ใน Android แล้วกลับมากด Enter ใน Termux ตามแนวทาง [Termux Storage](https://github.com/termux/termux-tools/blob/master/doc/termux.1.md.in) หากเขียนไม่ได้จะหยุดพร้อมแจ้งข้อผิดพลาด
+
+ไฟล์ ZIP จะถูกตรวจสอบก่อนบันทึกสำเร็จ หากชื่อซ้ำจะถามก่อนเขียนทับ และเก็บไฟล์เดิมไว้จนกว่าจะสร้างไฟล์ใหม่สำเร็จ เมื่อต้องการกู้คืน เลือก **3) นำเข้า data.zip จาก Downloads** แล้วใช้ **2) Restore Backup** (เมนูนำเข้าจะย้าย ZIP เข้า `~/ST-Backups`)
+
 ## 📦 กู้ data หลังติดตั้งใหม่ด้วย `install.sh` ข้อ b
 
 ข้อ b เก็บโฟลเดอร์เดิมไว้ที่ `~/SillyTavern_backup_วันเวลา` เมื่อติดตั้งใหม่แล้ว ให้ปิด SillyTavern และรัน:
