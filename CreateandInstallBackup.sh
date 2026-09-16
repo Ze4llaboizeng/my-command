@@ -16,6 +16,8 @@ DOWNLOAD_DIR=""
 TTY="/dev/tty"
 TEMP_RESTORE_DIR=""
 TEMP_BACKUP_DIR=""
+PROGRESS_PID=""
+SEVEN_ZIP="7zz"
 
 # =========================================================
 # Colors
@@ -34,6 +36,10 @@ GRAY="\033[0;90m"
 # =========================================================
 
 cleanup() {
+    if [ -n "$PROGRESS_PID" ]; then
+        kill "$PROGRESS_PID" 2>/dev/null
+        wait "$PROGRESS_PID" 2>/dev/null
+    fi
     if [ -n "$TEMP_BACKUP_DIR" ] && [ -d "$TEMP_BACKUP_DIR" ]; then
         rm -rf -- "$TEMP_BACKUP_DIR" 2>/dev/null
     fi
@@ -89,6 +95,52 @@ format_size() {
     du -sh "$1" 2>/dev/null | cut -f1
 }
 
+# 7-Zip reports byte-based progress itself. Other operations keep the spinner.
+# Always run the actual command in the foreground and preserve its exit status.
+run_with_progress() {
+    local label="$1"
+    local status=0
+    shift
+
+    echo "$label"
+    if [ "$1" = archive_with_progress ]; then
+        echo '[  0%]'
+    elif [ -t 1 ]; then
+        (
+            while true; do
+                for frame in '[=   ]' '[ =  ]' '[  = ]' '[   =]'; do
+                    printf '\r%s กำลังทำงาน...' "$frame"
+                    sleep 0.2
+                done
+            done
+        ) &
+        PROGRESS_PID=$!
+    fi
+
+    "$@" || status=$?
+
+    if [ -n "$PROGRESS_PID" ]; then
+        kill "$PROGRESS_PID" 2>/dev/null
+        wait "$PROGRESS_PID" 2>/dev/null
+        PROGRESS_PID=""
+        printf '\r\033[2K'
+    fi
+    if [ "$status" -eq 0 ]; then
+        if [ "$1" = archive_with_progress ]; then
+            printf '\n[100%%]\n'
+        fi
+        echo "[✓] $label — เสร็จแล้ว"
+    else
+        echo
+        echo "[✗] $label — ไม่สำเร็จ"
+    fi
+    return "$status"
+}
+
+archive_with_progress() {
+    "$SEVEN_ZIP" "$@" -tzip -bsp1 -bso0 -bse2
+}
+
 yes_answer() {
     case "$1" in
         y|Y|yes|YES|Yes)
@@ -119,8 +171,8 @@ check_dependencies() {
     local missing_packages=()
     local confirm=""
 
-    if ! command -v zip >/dev/null 2>&1; then
-        missing_packages+=("zip")
+    if ! command -v "$SEVEN_ZIP" >/dev/null 2>&1; then
+        missing_packages+=("7zip")
     fi
 
     if ! command -v unzip >/dev/null 2>&1; then
@@ -172,7 +224,7 @@ check_dependencies() {
         exit 1
     fi
 
-    for cmd in zip unzip; do
+    for cmd in "$SEVEN_ZIP" unzip; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo
             echo -e "${RED}✗ ยังไม่พบคำสั่ง $cmd หลังการติดตั้ง${RESET}"
@@ -344,9 +396,9 @@ backup_data() {
 
     if (
         cd "$ST_DIR" &&
-        zip -rq "$TEMP_BACKUP_DIR/backup.zip" data
-    ) && unzip -tq "$TEMP_BACKUP_DIR/backup.zip" >/dev/null 2>&1 &&
-        mv -fT -- "$TEMP_BACKUP_DIR/backup.zip" "$zipfile"; then
+        run_with_progress '[1/3] สร้าง ZIP จาก data' archive_with_progress a "$TEMP_BACKUP_DIR/backup.zip" data
+    ) && run_with_progress '[2/3] ตรวจสอบ ZIP' archive_with_progress t "$TEMP_BACKUP_DIR/backup.zip" &&
+        run_with_progress '[3/3] บันทึกไฟล์ Backup' mv -fT -- "$TEMP_BACKUP_DIR/backup.zip" "$zipfile"; then
         echo -e "${GREEN}✓ Backup สำเร็จ${RESET}"
         echo
         echo -e "ชื่อ      : ${BOLD}$name.zip${RESET}"
@@ -462,19 +514,23 @@ prepare_directories() {
 # =========================================================
 
 detect_download_dir() {
+    local candidate=""
+    local resolved=""
     DOWNLOAD_DIR=""
 
-    # Termux storage symlink หลังใช้ termux-setup-storage
-    if [ -d "$HOME/storage/downloads" ] && [ -r "$HOME/storage/downloads" ]; then
-        DOWNLOAD_DIR="$HOME/storage/downloads"
-        return 0
-    fi
-
-    # Android shared storage path
-    if [ -d "/storage/emulated/0/Download" ] && [ -r "/storage/emulated/0/Download" ]; then
-        DOWNLOAD_DIR="/storage/emulated/0/Download"
-        return 0
-    fi
+    # Both import and export use the phone's shared Download directory.
+    # Resolve Termux's shortcut and reject ordinary folders inside Termux.
+    for candidate in /storage/emulated/0/Download "$HOME/storage/downloads" /sdcard/Download; do
+        if [ -d "$candidate" ] && [ -r "$candidate" ]; then
+            resolved=$(cd -- "$candidate" && pwd -P) || continue
+            case "$resolved" in
+                /storage/*)
+                    DOWNLOAD_DIR="$resolved"
+                    return 0
+                    ;;
+            esac
+        fi
+    done
 
     return 1
 }
@@ -732,7 +788,7 @@ import_download_backup() {
     echo -e "${CYAN}→ กำลังย้าย Backup เข้า ST-Backups...${RESET}"
     echo
 
-    if mv -- "$source_file" "$destination"; then
+    if run_with_progress 'ย้าย Backup เข้า ST-Backups' mv -- "$source_file" "$destination"; then
         echo -e "${GREEN}${BOLD}✓ นำเข้า Backup สำเร็จ${RESET}"
         echo
         echo -e "ชื่อ      : ${BOLD}$backup_name.zip${RESET}"
@@ -760,7 +816,7 @@ validate_backup_zip() {
 
     echo -e "${CYAN}→ กำลังตรวจสอบความสมบูรณ์ของ ZIP...${RESET}"
 
-    if ! unzip -tq "$zipfile" >/dev/null 2>&1; then
+    if ! run_with_progress 'ตรวจสอบความสมบูรณ์ของ ZIP' archive_with_progress t "$zipfile"; then
         echo -e "${RED}✗ ZIP เสียหรืออ่านไม่ได้${RESET}"
         return 1
     fi
@@ -888,10 +944,10 @@ restore_backup() {
     echo
 
     if [ -d "$backup" ]; then
-        if cp -a -- "$backup/data/." "$TEMP_RESTORE_DIR/data"; then
+        if run_with_progress '[1/2] คัดลอก data ไปพื้นที่เตรียม Restore' cp -a -- "$backup/data/." "$TEMP_RESTORE_DIR/data"; then
             restore_ready=1
         fi
-    elif unzip -q "$backup" -d "$TEMP_RESTORE_DIR"; then
+    elif run_with_progress '[1/2] แตก ZIP ไปพื้นที่เตรียม Restore' archive_with_progress x "$backup" "-o$TEMP_RESTORE_DIR" -y; then
         restore_ready=1
     fi
 
@@ -978,7 +1034,7 @@ restore_backup() {
     echo
     echo -e "${CYAN}→ กำลังนำ data จาก Backup กลับเข้า SillyTavern...${RESET}"
 
-    if mv -- "$TEMP_RESTORE_DIR/data" "$DATA_DIR"; then
+    if run_with_progress '[2/2] วาง data สำหรับใช้งาน' mv -- "$TEMP_RESTORE_DIR/data" "$DATA_DIR"; then
         echo -e "${GREEN}✓ วาง data ใหม่สำเร็จ${RESET}"
 
         rm -rf -- "$TEMP_RESTORE_DIR"
@@ -1032,7 +1088,7 @@ main_menu() {
 
         echo -e "${BOLD}เลือกสิ่งที่ต้องการทำ${RESET}"
         echo
-        echo -e "  ${GREEN}1)${RESET} 📦 Backup SillyTavern data"
+        echo -e "  ${GREEN}1)${RESET} 📦 Backup data เก็บภายใน Termux"
         echo -e "  ${CYAN}2)${RESET} ♻️  Restore Backup"
         echo -e "  ${YELLOW}3)${RESET} 📥 นำเข้า data.zip จาก Downloads"
         echo -e "  ${CYAN}4)${RESET} 📋 ดูรายการ Backup"
