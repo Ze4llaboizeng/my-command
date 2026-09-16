@@ -342,7 +342,7 @@ backup_data() {
         return
     fi
 
-    # Keep exports discoverable by the existing data*.zip import menu.
+    # Keep the familiar data- prefix for backups exported to the phone.
     if [ "${1:-}" = downloads ] && [[ "$name" != data* ]]; then
         name="data-$name"
     fi
@@ -589,11 +589,13 @@ ensure_download_access() {
 }
 
 get_download_zips() {
+    local file=""
     DOWNLOAD_ZIPS=()
 
-    shopt -s nullglob nocaseglob
-    DOWNLOAD_ZIPS=("$DOWNLOAD_DIR"/data*.zip)
-    shopt -u nocaseglob nullglob
+    for file in "$DOWNLOAD_DIR"/*.[zZ][iI][pP] "$DOWNLOAD_DIR"/.*.[zZ][iI][pP]; do
+        [ -f "$file" ] && DOWNLOAD_ZIPS+=("$file")
+    done
+    return 0
 }
 
 file_modified_date() {
@@ -626,7 +628,7 @@ list_download_zips() {
     get_download_zips
 
     if [ "${#DOWNLOAD_ZIPS[@]}" -eq 0 ]; then
-        echo -e "${YELLOW}ไม่พบไฟล์ data*.zip ใน Downloads${RESET}"
+        echo -e "${YELLOW}ไม่พบไฟล์ ZIP ใน Downloads${RESET}"
         return 1
     fi
 
@@ -674,11 +676,8 @@ import_download_backup() {
 
     if ! list_download_zips; then
         echo
-        echo "รองรับชื่ออย่างเช่น:"
-        echo "  data.zip"
-        echo "  data (1).zip"
-        echo "  data-backup.zip"
-        echo "  Data.zip"
+        echo "รองรับ ZIP ทุกชื่อ เช่น backup.zip, my-st.zip หรือ สำรองข้อมูล.ZIP"
+        echo "ภายใน ZIP ต้องมีโฟลเดอร์ data/ สำหรับ Restore"
         pause
         return
     fi
@@ -701,7 +700,7 @@ import_download_backup() {
 
     source_file="${DOWNLOAD_ZIPS[$((choice - 1))]}"
     source_name=$(basename "$source_file")
-    source_base="${source_name%.zip}"
+    source_base="${source_name%.[zZ][iI][pP]}"
 
     echo
     echo -e "ไฟล์ที่เลือก : ${CYAN}$source_name${RESET}"
@@ -731,7 +730,7 @@ import_download_backup() {
         backup_name="$source_base"
     fi
 
-    backup_name="${backup_name%.zip}"
+    backup_name="${backup_name%.[zZ][iI][pP]}"
 
     if [ -z "$backup_name" ]; then
         echo
@@ -1090,7 +1089,7 @@ main_menu() {
         echo
         echo -e "  ${GREEN}1)${RESET} 📦 Backup data เก็บภายใน Termux"
         echo -e "  ${CYAN}2)${RESET} ♻️  Restore Backup"
-        echo -e "  ${YELLOW}3)${RESET} 📥 นำเข้า data.zip จาก Downloads"
+        echo -e "  ${YELLOW}3)${RESET} 📥 นำเข้า Backup ZIP จาก Downloads (ทุกชื่อ)"
         echo -e "  ${CYAN}4)${RESET} 📋 ดูรายการ Backup"
         echo -e "  ${GREEN}5)${RESET} 📤 Backup data ลง Download ของมือถือ"
         echo -e "  ${RED}0)${RESET} 🚪 ออก"
