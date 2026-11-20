@@ -1,4 +1,4 @@
- #!/bin/bash
+#!/bin/bash
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -14,8 +14,8 @@ echo -e "${CYAN}${BOLD}=======================================${NC}"
 echo ""
 echo -e "  เลือกปัญหาที่พบ:"
 echo ""
-echo -e "  ${YELLOW}[1]${NC} ERR_MODULE_NOT_FOUND"
-echo -e "        (ขึ้น error ตอนรัน ./start.sh)"
+echo -e "  ${YELLOW}[1]${NC} ERR_MODULE_NOT_FOUND / npm ENOTEMPTY"
+echo -e "        (ติดตั้ง node_modules ใหม่)"
 echo ""
 echo -e "  ${YELLOW}[2]${NC} npm มีปัญหา / npm path not found"
 echo -e "        (npm ใช้งานไม่ได้ หรือขึ้น command not found)"
@@ -48,10 +48,8 @@ check_npm() {
 }
 
 check_node_modules() {
-    # 0 = ปกติ | 1 = ไม่มีโฟลเดอร์ | 2 = มีแต่ไม่สมบูรณ์
-    [ ! -d ~/SillyTavern/node_modules ]      && return 1
-    [ ! -d ~/SillyTavern/node_modules/.bin ] && return 2
-    return 0
+    # ตรวจเฉพาะโครงสร้างโฟลเดอร์
+    [ -d ~/SillyTavern/node_modules/.bin ]
 }
 
 # ─────────────────────────────────────────────
@@ -59,7 +57,7 @@ check_node_modules() {
 # ─────────────────────────────────────────────
 
 run_diagnosis() {
-    echo -e "${CYAN}${BOLD}--- ตรวจสอบปัญหาทั้งหมด ---${NC}"
+    echo -e "${CYAN}${BOLD}--- ตรวจสอบ npm และ node_modules ---${NC}"
     echo ""
 
     NEED_FIX_NPM=0
@@ -68,7 +66,7 @@ run_diagnosis() {
     # ── npm ──
     echo -e "${YELLOW}[•] ตรวจสอบ npm...${NC}"
     if check_npm; then
-        echo -e "${GREEN}  ✅ npm $(npm -v) — ปกติ${NC}"
+        echo -e "${GREEN}  ✅ npm $NPM_VERSION — พร้อมใช้งาน${NC}"
     else
         NEED_FIX_NPM=1
         echo -e "${RED}  ❌ npm: ใช้งานไม่ได้  [ต้องแก้]${NC}"
@@ -76,16 +74,15 @@ run_diagnosis() {
     echo ""
 
     # ── node_modules ──
-    echo -e "${YELLOW}[•] ตรวจสอบ node_modules (~SillyTavern)...${NC}"
-    check_node_modules; NM_STATUS=$?
-    if [ $NM_STATUS -eq 0 ]; then
-        echo -e "${GREEN}  ✅ node_modules — ปกติ${NC}"
-    elif [ $NM_STATUS -eq 1 ]; then
+    echo -e "${YELLOW}[•] ตรวจสอบ node_modules (~/SillyTavern)...${NC}"
+    if [ "$CHOICE" = 1 ]; then
         NEED_FIX_MODULES=1
-        echo -e "${RED}  ❌ node_modules: ไม่พบโฟลเดอร์  [ต้องแก้]${NC}"
+        echo -e "${YELLOW}  → ติดตั้ง dependencies ใหม่ตามตัวเลือกที่ 1${NC}"
+    elif check_node_modules; then
+        echo -e "${GREEN}  ✅ พบโฟลเดอร์ node_modules และ .bin${NC}"
     else
         NEED_FIX_MODULES=1
-        echo -e "${RED}  ❌ node_modules: มีแต่ไม่สมบูรณ์  [ต้องแก้]${NC}"
+        echo -e "${RED}  ❌ ไม่พบโฟลเดอร์ node_modules หรือ .bin  [ต้องแก้]${NC}"
     fi
     echo ""
 
@@ -93,21 +90,9 @@ run_diagnosis() {
     echo -e "${CYAN}${BOLD}--- สรุปแผนการแก้ไข ---${NC}"
     echo ""
     if [ $NEED_FIX_NPM -eq 0 ] && [ $NEED_FIX_MODULES -eq 0 ]; then
-        echo -e "${GREEN}  ✅ ไม่พบปัญหาใดๆ — ระบบดูปกติแล้ว${NC}"
+        echo -e "${GREEN}  ✅ ผ่านการตรวจ npm และโฟลเดอร์เบื้องต้น${NC}"
         echo ""
-        echo -e "${YELLOW}${BOLD}═══════════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}${BOLD}   📌  อยู่ในโฟลเดอร์ SillyTavern แล้ว${NC}"
-        echo -e "${YELLOW}${BOLD}═══════════════════════════════════════════════${NC}"
-        echo ""
-        echo -e "${GREEN}${BOLD}   กรุณารันคำสั่งเปิด SillyTavern เพื่อทำการใช้งาน:${NC}"
-        echo ""
-        echo -e "        ${CYAN}${BOLD}./start.sh${NC}"
-        echo ""
-        echo -e "${YELLOW}   (โดยไม่ต้องใส่ cd SillyTavern ซ้ำอีกครั้ง — อยู่ในโฟลเดอร์นี้อยู่แล้ว)${NC}"
-        echo ""
-        echo -e "${YELLOW}${BOLD}═══════════════════════════════════════════════${NC}"
-        echo ""
-        exit 0
+        return 0
     fi
 
     STEP=1
@@ -149,7 +134,7 @@ fix_npm() {
         echo -e "${RED}❌ ยังไม่พบ npm — แคปหน้าจอส่งให้ทีมช่วยเหลือ${NC}"
         exit 1
     fi
-    echo -e "${GREEN}✅ npm $(npm -v) — พร้อมใช้งาน${NC}"
+    echo -e "${GREEN}✅ npm $NPM_VERSION — พร้อมใช้งาน${NC}"
     echo ""
 }
 
@@ -162,7 +147,10 @@ fix_node_modules() {
     echo ""
 
     echo -e "${YELLOW}[•] ลบ node_modules เก่า...${NC}"
-    rm -rf ~/SillyTavern/node_modules
+    if ! rm -rf -- ~/SillyTavern/node_modules; then
+        echo -e "${RED}❌ ลบ node_modules ไม่สำเร็จ${NC}"
+        exit 1
+    fi
     echo -e "${GREEN}✅ ลบเรียบร้อย${NC}"
     echo ""
 
@@ -208,9 +196,9 @@ run_fix() {
         fix_node_modules
     fi
 
-    echo -e "${GREEN}${BOLD}✅ แก้ไขทุกปัญหาเรียบร้อยแล้ว — กำลังรัน SillyTavern...${NC}"
+    echo -e "${CYAN}${BOLD}กำลังรัน SillyTavern...${NC}"
     echo ""
-    ./start.sh
+    bash ./start.sh
 }
 
 # ─────────────────────────────────────────────
@@ -224,7 +212,7 @@ case "$CHOICE" in
         fix_webpack
         echo -e "${GREEN}${BOLD}✅ แก้ไขปัญหา Webpack เรียบร้อยแล้ว — กำลังรัน SillyTavern...${NC}"
         echo ""
-        ./start.sh
+        bash ./start.sh
         ;;
     0)   echo -e "${CYAN}ออกจากสคริปต์${NC}"; exit 0 ;;
     *)   echo -e "${RED}❌ ตัวเลือกไม่ถูกต้อง กรุณาเลือก 0, 1, 2 หรือ 3${NC}"; exit 1 ;;
